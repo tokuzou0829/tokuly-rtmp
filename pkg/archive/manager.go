@@ -291,13 +291,19 @@ func (m *Manager) convertToHLS(recordPath, hlsDir string) error {
 	segmentDuration := formatSeconds(m.cfg.HLSSegmentDuration)
 	segmentPattern := filepath.Join(hlsDir, "segment_%06d.m4s")
 	outPlaylist := filepath.Join(hlsDir, "index.m3u8")
+	// 前提: フレームレートを30fps、セグメント長を例えば "2" (秒) と仮定した場合の設定です
+	// 実際には変数に合わせて調整してください
+
 	args := []string{
 		"-hide_banner",
 		"-y",
 		"-i", recordPath,
 		"-map", "0:v:0",
 		"-map", "0:a:0?",
-		"-c:v", "copy",
+		"-c:v", "libx264",
+		"-pix_fmt", "yuv420p",
+		"-g", "60",
+		"-sc_threshold", "0",
 		"-c:a", "copy",
 		"-f", "hls",
 		"-hls_time", segmentDuration,
