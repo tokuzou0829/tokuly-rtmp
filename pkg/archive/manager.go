@@ -302,7 +302,7 @@ func (m *Manager) convertToHLS(recordPath, hlsDir string) error {
 		"-f", "hls",
 		"-hls_time", segmentDuration,
 		"-hls_list_size", "0",
-		"-hls_flags", "split_by_time+program_date_time+independent_segments+round_durations",
+		"-hls_flags", "program_date_time+independent_segments+round_durations",
 		"-hls_segment_type", "fmp4",
 		"-hls_segment_filename", segmentPattern,
 		outPlaylist,
