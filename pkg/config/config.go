@@ -25,8 +25,11 @@ type RTMPConfig struct {
 }
 
 type PolicyConfig struct {
+	MinWidth              int
+	MinHeight             int
 	MaxWidth              int
 	MaxHeight             int
+	MaxPixels             int64
 	FirstKeyframeTimeout  time.Duration
 	MaxGOPSeconds         float64
 	AllowNoAudio          bool
@@ -103,8 +106,11 @@ func DefaultConfig() Config {
 			WriteTimeout: 30 * time.Second,
 		},
 		Policy: PolicyConfig{
-			MaxWidth:              1920,
-			MaxHeight:             1080,
+			MinWidth:              240,
+			MinHeight:             240,
+			MaxWidth:              2560,
+			MaxHeight:             2560,
+			MaxPixels:             2560 * 1600,
 			FirstKeyframeTimeout:  2 * time.Second,
 			MaxGOPSeconds:         2.0,
 			AllowNoAudio:          false,
@@ -212,11 +218,20 @@ func Load() Config {
 		cfg.Auth.HTTPUserAgent = v
 	}
 
+	if v := os.Getenv("MIN_WIDTH"); v != "" {
+		cfg.Policy.MinWidth = parseInt(v, cfg.Policy.MinWidth)
+	}
+	if v := os.Getenv("MIN_HEIGHT"); v != "" {
+		cfg.Policy.MinHeight = parseInt(v, cfg.Policy.MinHeight)
+	}
 	if v := os.Getenv("MAX_WIDTH"); v != "" {
 		cfg.Policy.MaxWidth = parseInt(v, cfg.Policy.MaxWidth)
 	}
 	if v := os.Getenv("MAX_HEIGHT"); v != "" {
 		cfg.Policy.MaxHeight = parseInt(v, cfg.Policy.MaxHeight)
+	}
+	if v := os.Getenv("MAX_PIXELS"); v != "" {
+		cfg.Policy.MaxPixels = parseInt64(v, cfg.Policy.MaxPixels)
 	}
 	if v := os.Getenv("FIRST_KEYFRAME_TIMEOUT"); v != "" {
 		cfg.Policy.FirstKeyframeTimeout = parseDuration(v, cfg.Policy.FirstKeyframeTimeout)

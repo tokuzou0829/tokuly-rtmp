@@ -62,8 +62,11 @@ const videoInfoURL = "https://api.tokuly.com/live/stream/videoinfo"
 const archiveStatusURL = "https://api.tokuly.com/live/stream/archive/status"
 
 type Config struct {
+	MinWidth             int
+	MinHeight            int
 	MaxWidth             int
 	MaxHeight            int
+	MaxPixels            int64
 	FirstKeyframeTimeout time.Duration
 	MaxGOPSeconds        float64
 	AllowNoAudio         bool
@@ -132,8 +135,8 @@ func (p *HTTPPolicy) Evaluate(ctx context.Context, result inspect.Result) Result
 	if p.Config.RejectIfVideoNotH264 && result.VideoCodec != "H264" {
 		return Result{Decision: DecisionReject, Reason: ReasonCodecUnsupported, Message: "video codec not supported"}
 	}
-	if !isSupportedResolution(result.Width, result.Height, p.Config.MaxWidth, p.Config.MaxHeight) {
-		return Result{Decision: DecisionReject, Reason: ReasonResolutionTooBig, Message: "resolution must be 16:9 or 9:16 and within the configured maximum"}
+	if !isSupportedResolution(result.Width, result.Height, p.Config) {
+		return Result{Decision: DecisionReject, Reason: ReasonResolutionTooBig, Message: "resolution is outside the configured dimensions or pixel count"}
 	}
 	if !result.KeyframeReceived {
 		return Result{Decision: DecisionReject, Reason: ReasonNoKeyframeTimeout, Message: "first keyframe timeout"}
@@ -155,14 +158,26 @@ func (p *HTTPPolicy) Evaluate(ctx context.Context, result inspect.Result) Result
 	return Result{Decision: DecisionAccept}
 }
 
-func isSupportedResolution(width, height, maxWidth, maxHeight int) bool {
-	if width <= 0 || height <= 0 || maxWidth <= 0 || maxHeight <= 0 {
+func isSupportedResolution(width, height int, cfg Config) bool {
+	if width <= 0 || height <= 0 {
 		return false
 	}
-
-	landscape := width*9 == height*16 && width <= maxWidth && height <= maxHeight
-	portrait := width*16 == height*9 && width <= maxHeight && height <= maxWidth
-	return landscape || portrait
+	if cfg.MinWidth > 0 && width < cfg.MinWidth {
+		return false
+	}
+	if cfg.MinHeight > 0 && height < cfg.MinHeight {
+		return false
+	}
+	if cfg.MaxWidth > 0 && width > cfg.MaxWidth {
+		return false
+	}
+	if cfg.MaxHeight > 0 && height > cfg.MaxHeight {
+		return false
+	}
+	if cfg.MaxPixels > 0 && int64(width)*int64(height) > cfg.MaxPixels {
+		return false
+	}
+	return true
 }
 
 func (p *HTTPPolicy) NotifyStreamEnd(ctx context.Context, streamKey string) error {

@@ -11,8 +11,8 @@ import (
 
 	"tokuly-live-rtmp-server/pkg/archive"
 	"tokuly-live-rtmp-server/pkg/config"
-	rtmpsrv "tokuly-live-rtmp-server/pkg/rtmp"
 	"tokuly-live-rtmp-server/pkg/policy"
+	rtmpsrv "tokuly-live-rtmp-server/pkg/rtmp"
 	"tokuly-live-rtmp-server/pkg/storage"
 )
 
@@ -31,8 +31,11 @@ func main() {
 		HTTPUserAgent: cfg.Auth.HTTPUserAgent,
 		DebugSkip:     cfg.DebugRTMP,
 		Config: policy.Config{
+			MinWidth:             cfg.Policy.MinWidth,
+			MinHeight:            cfg.Policy.MinHeight,
 			MaxWidth:             cfg.Policy.MaxWidth,
 			MaxHeight:            cfg.Policy.MaxHeight,
+			MaxPixels:            cfg.Policy.MaxPixels,
 			FirstKeyframeTimeout: cfg.Policy.FirstKeyframeTimeout,
 			MaxGOPSeconds:        cfg.Policy.MaxGOPSeconds,
 			AllowNoAudio:         cfg.Policy.AllowNoAudio,
