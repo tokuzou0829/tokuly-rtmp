@@ -32,10 +32,10 @@ const (
 )
 
 type Result struct {
-	Decision Decision
-	Reason   string
-	Message  string
-	StreamName string
+	Decision    Decision
+	Reason      string
+	Message     string
+	StreamName  string
 	AllowRewind *bool
 }
 
@@ -132,10 +132,8 @@ func (p *HTTPPolicy) Evaluate(ctx context.Context, result inspect.Result) Result
 	if p.Config.RejectIfVideoNotH264 && result.VideoCodec != "H264" {
 		return Result{Decision: DecisionReject, Reason: ReasonCodecUnsupported, Message: "video codec not supported"}
 	}
-	if result.Width > 0 && result.Height > 0 {
-		if result.Width > p.Config.MaxWidth || result.Height > p.Config.MaxHeight {
-			return Result{Decision: DecisionReject, Reason: ReasonResolutionTooBig, Message: "resolution too large"}
-		}
+	if !isSupportedResolution(result.Width, result.Height, p.Config.MaxWidth, p.Config.MaxHeight) {
+		return Result{Decision: DecisionReject, Reason: ReasonResolutionTooBig, Message: "resolution must be 16:9 or 9:16 and within the configured maximum"}
 	}
 	if !result.KeyframeReceived {
 		return Result{Decision: DecisionReject, Reason: ReasonNoKeyframeTimeout, Message: "first keyframe timeout"}
@@ -155,6 +153,16 @@ func (p *HTTPPolicy) Evaluate(ctx context.Context, result inspect.Result) Result
 		}
 	}
 	return Result{Decision: DecisionAccept}
+}
+
+func isSupportedResolution(width, height, maxWidth, maxHeight int) bool {
+	if width <= 0 || height <= 0 || maxWidth <= 0 || maxHeight <= 0 {
+		return false
+	}
+
+	landscape := width*9 == height*16 && width <= maxWidth && height <= maxHeight
+	portrait := width*16 == height*9 && width <= maxHeight && height <= maxWidth
+	return landscape || portrait
 }
 
 func (p *HTTPPolicy) NotifyStreamEnd(ctx context.Context, streamKey string) error {

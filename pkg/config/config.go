@@ -104,7 +104,7 @@ func DefaultConfig() Config {
 		},
 		Policy: PolicyConfig{
 			MaxWidth:              1920,
-			MaxHeight:             1920,
+			MaxHeight:             1080,
 			FirstKeyframeTimeout:  2 * time.Second,
 			MaxGOPSeconds:         2.0,
 			AllowNoAudio:          false,
