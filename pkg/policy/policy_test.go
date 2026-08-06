@@ -1,6 +1,9 @@
 package policy
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestIsSupportedResolution(t *testing.T) {
 	cfg := Config{
@@ -38,6 +41,63 @@ func TestIsSupportedResolution(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := isSupportedResolution(tt.width, tt.height, cfg); got != tt.want {
 				t.Fatalf("isSupportedResolution(%d, %d) = %t, want %t", tt.width, tt.height, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildArchiveStatusPayload(t *testing.T) {
+	tests := []struct {
+		name            string
+		status          bool
+		durationSeconds float64
+		wantJSON        string
+		wantErr         bool
+	}{
+		{
+			name:            "success includes zero duration",
+			status:          true,
+			durationSeconds: 0,
+			wantJSON:        `{"name":"stream-name","status":true,"key":"secret","duration_seconds":0}`,
+		},
+		{
+			name:            "success includes fractional duration",
+			status:          true,
+			durationSeconds: 42.125,
+			wantJSON:        `{"name":"stream-name","status":true,"key":"secret","duration_seconds":42.125}`,
+		},
+		{
+			name:            "failure omits duration",
+			status:          false,
+			durationSeconds: 42.125,
+			wantJSON:        `{"name":"stream-name","status":false,"key":"secret"}`,
+		},
+		{
+			name:            "negative duration is rejected",
+			status:          true,
+			durationSeconds: -1,
+			wantErr:         true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload, err := buildArchiveStatusPayload("stream-name", "secret", tt.status, tt.durationSeconds)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("buildArchiveStatusPayload() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("buildArchiveStatusPayload() error = %v", err)
+			}
+			got, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatalf("json.Marshal() error = %v", err)
+			}
+			if string(got) != tt.wantJSON {
+				t.Fatalf("payload JSON = %s, want %s", got, tt.wantJSON)
 			}
 		})
 	}

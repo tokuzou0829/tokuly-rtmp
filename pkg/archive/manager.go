@@ -224,6 +224,10 @@ func (m *Manager) finalize(streamName string) {
 	if recorder != nil {
 		recorder.Close()
 	}
+	durationSeconds := 0.0
+	if recorder != nil {
+		durationSeconds = recorder.Duration().Seconds()
+	}
 
 	m.mu.Lock()
 	state = m.states[streamName]
@@ -238,7 +242,7 @@ func (m *Manager) finalize(streamName string) {
 	if err != nil {
 		log.Printf("archive convert error: stream=%s err=%v", streamName, err)
 	}
-	if notifyErr := m.notifyArchiveStatus(streamName, err == nil); notifyErr != nil {
+	if notifyErr := m.notifyArchiveStatus(streamName, err == nil, durationSeconds); notifyErr != nil {
 		log.Printf("archive status notify error: stream=%s err=%v", streamName, notifyErr)
 	}
 
@@ -316,12 +320,12 @@ func (m *Manager) convertToHLS(recordPath, hlsDir string) error {
 	return nil
 }
 
-func (m *Manager) notifyArchiveStatus(streamName string, ok bool) error {
+func (m *Manager) notifyArchiveStatus(streamName string, ok bool, durationSeconds float64) error {
 	if m.policy == nil {
 		return nil
 	}
 	ctx := context.Background()
-	return m.policy.NotifyArchiveStatus(ctx, streamName, ok)
+	return m.policy.NotifyArchiveStatus(ctx, streamName, ok, durationSeconds)
 }
 
 func renderTemplate(tmpl, streamName string, start time.Time) string {

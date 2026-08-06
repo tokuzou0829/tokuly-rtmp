@@ -44,6 +44,10 @@ type Recorder struct {
 	startTSMS int64
 	lastTSMS  int64
 
+	videoDurationStarted bool
+	videoStartMS         int64
+	videoEndMS           int64
+
 	fragmentSeq        uint32
 	fragmentDurationMS int64
 	currentFragment    *fragmentBuilder
@@ -214,6 +218,16 @@ func (r *Recorder) Close() {
 	}
 }
 
+// Duration returns the duration of video samples accepted by the recorder.
+func (r *Recorder) Duration() time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.videoDurationStarted || r.videoEndMS <= r.videoStartMS {
+		return 0
+	}
+	return time.Duration(r.videoEndMS-r.videoStartMS) * time.Millisecond
+}
+
 func (r *Recorder) flushLocked() {
 	if err := r.flushTrack(&r.videoState); err != nil {
 		r.markFailed(err.Error())
@@ -323,6 +337,17 @@ func (r *Recorder) flushTrack(state *trackState) error {
 }
 
 func (r *Recorder) appendToFragment(ts trackSample) error {
+	if ts.trackID == r.videoID {
+		startMS := timescaleToMS(ts.sample.DecodeTime, r.videoTS)
+		endMS := startMS + timescaleToMS(uint64(ts.sample.Dur), r.videoTS)
+		if !r.videoDurationStarted {
+			r.videoDurationStarted = true
+			r.videoStartMS = startMS
+		}
+		if endMS > r.videoEndMS {
+			r.videoEndMS = endMS
+		}
+	}
 	fragIdx, fragStartMS := r.computeFragmentIndex(ts.sample.DecodeTime, ts.trackID == r.videoID)
 	fragEndMS := fragStartMS + r.fragmentDurationMS
 	if r.fragmentDurationMS <= 0 {

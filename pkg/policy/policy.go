@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -44,7 +45,7 @@ type Policy interface {
 	Evaluate(ctx context.Context, result inspect.Result) Result
 	NotifyStreamEnd(ctx context.Context, streamKey string) error
 	NotifyVideoInfo(ctx context.Context, streamKey string, result inspect.Result) error
-	NotifyArchiveStatus(ctx context.Context, streamKey string, status bool) error
+	NotifyArchiveStatus(ctx context.Context, streamKey string, status bool, durationSeconds float64) error
 }
 
 type HTTPPolicy struct {
@@ -250,14 +251,35 @@ func (p *HTTPPolicy) NotifyVideoInfo(ctx context.Context, streamKey string, resu
 	return nil
 }
 
-func (p *HTTPPolicy) NotifyArchiveStatus(ctx context.Context, streamKey string, status bool) error {
+type archiveStatusPayload struct {
+	Name            string   `json:"name"`
+	Status          bool     `json:"status"`
+	Key             string   `json:"key"`
+	DurationSeconds *float64 `json:"duration_seconds,omitempty"`
+}
+
+func buildArchiveStatusPayload(streamKey, apiKey string, status bool, durationSeconds float64) (archiveStatusPayload, error) {
+	if durationSeconds < 0 || math.IsNaN(durationSeconds) || math.IsInf(durationSeconds, 0) {
+		return archiveStatusPayload{}, fmt.Errorf("archive duration seconds must be a finite non-negative number")
+	}
+	payload := archiveStatusPayload{
+		Name:   streamKey,
+		Status: status,
+		Key:    apiKey,
+	}
+	if status {
+		payload.DurationSeconds = &durationSeconds
+	}
+	return payload, nil
+}
+
+func (p *HTTPPolicy) NotifyArchiveStatus(ctx context.Context, streamKey string, status bool, durationSeconds float64) error {
+	payload, err := buildArchiveStatusPayload(streamKey, p.APIKey, status, durationSeconds)
+	if err != nil {
+		return err
+	}
 	if p.DebugSkip || p.APIKey == "" {
 		return nil
-	}
-	payload := map[string]interface{}{
-		"name":   streamKey,
-		"status": status,
-		"key":    p.APIKey,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
