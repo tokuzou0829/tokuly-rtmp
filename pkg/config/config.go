@@ -82,19 +82,27 @@ type AuthConfig struct {
 }
 
 type ArchiveConfig struct {
-	Enable              bool
-	RootDir             string
-	HLSRootDir          string
-	RecordDirTemplate   string
-	HLSDirTemplate      string
-	RecordFilename      string
-	FFmpegPath          string
-	ReconnectGrace      time.Duration
-	FragmentDuration    time.Duration
-	HLSSegmentDuration  time.Duration
-	LowBitrateThreshold int64
-	MaxDurationLow      time.Duration
-	MaxSizeHighBytes    int64
+	Enable               bool
+	RootDir              string
+	HLSRootDir           string
+	RecordDirTemplate    string
+	HLSDirTemplate       string
+	RecordFilename       string
+	FFmpegPath           string
+	FFprobePath          string
+	PreviewEnable        bool
+	PreviewIntervalMode  string
+	PreviewMaxFrames     int
+	PreviewMinInterval   time.Duration
+	PreviewSamplingMode  string
+	PreviewSeekJobs      int
+	PreviewSeekThreshold time.Duration
+	ReconnectGrace       time.Duration
+	FragmentDuration     time.Duration
+	HLSSegmentDuration   time.Duration
+	LowBitrateThreshold  int64
+	MaxDurationLow       time.Duration
+	MaxSizeHighBytes     int64
 }
 
 func DefaultConfig() Config {
@@ -158,19 +166,27 @@ func DefaultConfig() Config {
 			HTTPUserAgent: "go-rtmp-server/0.1",
 		},
 		Archive: ArchiveConfig{
-			Enable:              true,
-			RootDir:             "./archive",
-			HLSRootDir:          "./archive-hls",
-			RecordDirTemplate:   "{streamName}/{startUTC}",
-			HLSDirTemplate:      "{streamName}/{startUTC}",
-			RecordFilename:      "archive.mp4",
-			FFmpegPath:          "/opt/homebrew/bin/ffmpeg",
-			ReconnectGrace:      30 * time.Second,
-			FragmentDuration:    2 * time.Second,
-			HLSSegmentDuration:  10 * time.Second,
-			LowBitrateThreshold: 12000000,
-			MaxDurationLow:      90 * time.Minute,
-			MaxSizeHighBytes:    int64(5) * 1024 * 1024 * 1024,
+			Enable:               true,
+			RootDir:              "./archive",
+			HLSRootDir:           "./archive-hls",
+			RecordDirTemplate:    "{streamName}/{startUTC}",
+			HLSDirTemplate:       "{streamName}/{startUTC}",
+			RecordFilename:       "archive.mp4",
+			FFmpegPath:           "/opt/homebrew/bin/ffmpeg",
+			FFprobePath:          "/opt/homebrew/bin/ffprobe",
+			PreviewEnable:        true,
+			PreviewIntervalMode:  "smooth",
+			PreviewMaxFrames:     320,
+			PreviewMinInterval:   5 * time.Second,
+			PreviewSamplingMode:  "auto",
+			PreviewSeekJobs:      4,
+			PreviewSeekThreshold: 15 * time.Second,
+			ReconnectGrace:       30 * time.Second,
+			FragmentDuration:     2 * time.Second,
+			HLSSegmentDuration:   10 * time.Second,
+			LowBitrateThreshold:  12000000,
+			MaxDurationLow:       90 * time.Minute,
+			MaxSizeHighBytes:     int64(5) * 1024 * 1024 * 1024,
 		},
 		DebugRTMP: false,
 	}
@@ -316,6 +332,30 @@ func Load() Config {
 	}
 	if v := os.Getenv("ARCHIVE_FFMPEG_PATH"); v != "" {
 		cfg.Archive.FFmpegPath = v
+	}
+	if v := os.Getenv("ARCHIVE_FFPROBE_PATH"); v != "" {
+		cfg.Archive.FFprobePath = v
+	}
+	if v := os.Getenv("ARCHIVE_PREVIEW_ENABLE"); v != "" {
+		cfg.Archive.PreviewEnable = parseBool(v, cfg.Archive.PreviewEnable)
+	}
+	if v := os.Getenv("ARCHIVE_PREVIEW_INTERVAL_MODE"); v != "" {
+		cfg.Archive.PreviewIntervalMode = v
+	}
+	if v := os.Getenv("ARCHIVE_PREVIEW_MAX_FRAMES"); v != "" {
+		cfg.Archive.PreviewMaxFrames = parseInt(v, cfg.Archive.PreviewMaxFrames)
+	}
+	if v := os.Getenv("ARCHIVE_PREVIEW_MIN_INTERVAL"); v != "" {
+		cfg.Archive.PreviewMinInterval = parseDuration(v, cfg.Archive.PreviewMinInterval)
+	}
+	if v := os.Getenv("ARCHIVE_PREVIEW_SAMPLING_MODE"); v != "" {
+		cfg.Archive.PreviewSamplingMode = v
+	}
+	if v := os.Getenv("ARCHIVE_PREVIEW_SEEK_JOBS"); v != "" {
+		cfg.Archive.PreviewSeekJobs = parseInt(v, cfg.Archive.PreviewSeekJobs)
+	}
+	if v := os.Getenv("ARCHIVE_PREVIEW_SEEK_INTERVAL_THRESHOLD"); v != "" {
+		cfg.Archive.PreviewSeekThreshold = parseDuration(v, cfg.Archive.PreviewSeekThreshold)
 	}
 	if v := os.Getenv("ARCHIVE_RECONNECT_GRACE"); v != "" {
 		cfg.Archive.ReconnectGrace = parseDuration(v, cfg.Archive.ReconnectGrace)

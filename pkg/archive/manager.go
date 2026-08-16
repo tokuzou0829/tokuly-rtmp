@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -26,6 +25,7 @@ type Manager struct {
 	policy       policy.Policy
 	allowNoAudio bool
 	states       map[string]*ArchiveState
+	runCommand   previewCommandRunner
 }
 
 type ArchiveState struct {
@@ -48,6 +48,7 @@ func NewManager(cfg config.ArchiveConfig, pol policy.Policy, allowNoAudio bool) 
 		policy:       pol,
 		allowNoAudio: allowNoAudio,
 		states:       make(map[string]*ArchiveState),
+		runCommand:   defaultPreviewCommandRunner,
 	}
 }
 
@@ -238,11 +239,17 @@ func (m *Manager) finalize(streamName string) {
 	state.converting = true
 	m.mu.Unlock()
 
-	err := m.convertToHLS(recordPath, hlsDir)
-	if err != nil {
-		log.Printf("archive convert error: stream=%s err=%v", streamName, err)
+	archiveErr := m.convertToHLS(recordPath, hlsDir)
+	if archiveErr != nil {
+		log.Printf("archive convert error: stream=%s err=%v", streamName, archiveErr)
+	} else if m.cfg.PreviewEnable {
+		playlistPath := filepath.Join(hlsDir, "index.m3u8")
+		previewDir := filepath.Join(hlsDir, "video_preview")
+		if previewErr := generateVideoPreview(m.cfg, playlistPath, previewDir, m.commandRunner()); previewErr != nil {
+			log.Printf("archive preview error: stream=%s err=%v", streamName, previewErr)
+		}
 	}
-	if notifyErr := m.notifyArchiveStatus(streamName, err == nil, durationSeconds); notifyErr != nil {
+	if notifyErr := m.notifyArchiveStatus(streamName, archiveErr == nil, durationSeconds); notifyErr != nil {
 		log.Printf("archive status notify error: stream=%s err=%v", streamName, notifyErr)
 	}
 
@@ -312,12 +319,18 @@ func (m *Manager) convertToHLS(recordPath, hlsDir string) error {
 		"-hls_segment_filename", segmentPattern,
 		outPlaylist,
 	}
-	cmd := exec.Command(m.cfg.FFmpegPath, args...)
-	output, err := cmd.CombinedOutput()
+	output, err := m.commandRunner()(m.cfg.FFmpegPath, args...)
 	if err != nil {
 		return fmt.Errorf("ffmpeg failed: %w output=%s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+func (m *Manager) commandRunner() previewCommandRunner {
+	if m.runCommand == nil {
+		return defaultPreviewCommandRunner
+	}
+	return m.runCommand
 }
 
 func (m *Manager) notifyArchiveStatus(streamName string, ok bool, durationSeconds float64) error {
