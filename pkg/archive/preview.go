@@ -164,6 +164,9 @@ func generateVideoPreview(cfg config.ArchiveConfig, input, outputDir string, run
 	if err := os.WriteFile(filepath.Join(tmpDir, "manifest.json"), manifestData, 0644); err != nil {
 		return err
 	}
+	if err := os.Chmod(tmpDir, 0755); err != nil {
+		return err
+	}
 	if err := os.Rename(tmpDir, cleanOutput); err != nil {
 		return err
 	}

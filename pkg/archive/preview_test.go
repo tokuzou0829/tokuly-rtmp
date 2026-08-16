@@ -103,6 +103,13 @@ func TestGenerateVideoPreviewPublishesManifestAndSprites(t *testing.T) {
 	if err := generateVideoPreview(cfg, input, outputDir, runner); err != nil {
 		t.Fatalf("generateVideoPreview() error = %v", err)
 	}
+	outputInfo, err := os.Stat(outputDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := outputInfo.Mode().Perm(), os.FileMode(0755); got != want {
+		t.Fatalf("preview output permissions = %o, want %o", got, want)
+	}
 	manifestData, err := os.ReadFile(filepath.Join(outputDir, "manifest.json"))
 	if err != nil {
 		t.Fatal(err)
