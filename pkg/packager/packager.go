@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/Eyevinn/mp4ff/mp4"
@@ -16,20 +17,20 @@ import (
 )
 
 type Config struct {
-	SegmentDuration     time.Duration
-	PartDuration        time.Duration
-	PlaylistWindow      time.Duration
-	TargetDuration      time.Duration
-	HoldBack            time.Duration
-	PartHoldBack        time.Duration
-	KeepSegments        int
+	SegmentDuration      time.Duration
+	PartDuration         time.Duration
+	PlaylistWindow       time.Duration
+	TargetDuration       time.Duration
+	HoldBack             time.Duration
+	PartHoldBack         time.Duration
+	KeepSegments         int
 	RewindPlaylistWindow time.Duration
-	InitFilename        string
-	SegmentFilenameTmpl string
-	PartFilenameTmpl    string
-	PlaylistName        string
-	RewindPlaylistName  string
-	EnablePartial       bool
+	InitFilename         string
+	SegmentFilenameTmpl  string
+	PartFilenameTmpl     string
+	PlaylistName         string
+	RewindPlaylistName   string
+	EnablePartial        bool
 }
 
 type Packager struct {
@@ -62,8 +63,17 @@ type Packager struct {
 	videoState trackState
 	audioState trackState
 
+	reorderQueue     []queuedTrackSample
+	latestInputDTSMS int64
+	hasLatestInput   bool
+	lastOutputDTSMS  int64
+	hasLastOutput    bool
+	nextQueueOrder   uint64
+
 	pendingDiscontinuity bool
 }
+
+const fallbackVideoSampleDurationMS int64 = 40
 
 type pendingSample struct {
 	dtsMS int64
@@ -85,7 +95,13 @@ type trackState struct {
 
 type trackSample struct {
 	trackID uint32
+	dtsMS   int64
 	sample  mp4.FullSample
+}
+
+type queuedTrackSample struct {
+	trackSample
+	order uint64
 }
 
 type partBuilder struct {
@@ -119,13 +135,13 @@ func New(cfg Config, storage *storage.Storage, streamID string) *Packager {
 		PlaylistName:    cfg.PlaylistName,
 	}
 	p := &Packager{
-		cfg:              cfg,
-		storage:          storage,
-		streamID:         streamID,
-		playlist:         hls.New(liveCfg, storage, streamID),
-		partDurationMS:   int64(cfg.PartDuration / time.Millisecond),
+		cfg:               cfg,
+		storage:           storage,
+		streamID:          streamID,
+		playlist:          hls.New(liveCfg, storage, streamID),
+		partDurationMS:    int64(cfg.PartDuration / time.Millisecond),
 		segmentDurationMS: int64(cfg.SegmentDuration / time.Millisecond),
-		videoTS:          90000,
+		videoTS:           90000,
 	}
 	p.videoState.sampleIsVideo = true
 	if storage.EnableRewind {
@@ -208,6 +224,12 @@ func (p *Packager) Flush() error {
 	if err := p.flushTrack(&p.audioState); err != nil {
 		return err
 	}
+	if err := p.drainReorderQueue(true); err != nil {
+		return err
+	}
+	if err := p.finalizePart(); err != nil {
+		return err
+	}
 	return p.finalizeSegment()
 }
 
@@ -232,10 +254,10 @@ func (p *Packager) addSample(isVideo bool, sample pendingSample) error {
 	if err != nil {
 		return err
 	}
-	if full == nil {
-		return nil
+	if full != nil {
+		p.enqueueSample(*full)
 	}
-	return p.appendToPart(*full)
+	return p.drainReorderQueue(false)
 }
 
 func (p *Packager) ingestSample(state *trackState, sample pendingSample) (*trackSample, error) {
@@ -244,7 +266,7 @@ func (p *Packager) ingestSample(state *trackState, sample pendingSample) (*track
 			state.timescale = p.videoTS
 			state.trackID = p.videoID
 			if state.defaultDurMS == 0 {
-				state.defaultDurMS = 33
+				state.defaultDurMS = fallbackVideoSampleDurationMS
 			}
 		} else {
 			state.timescale = p.audioTS
@@ -254,16 +276,20 @@ func (p *Packager) ingestSample(state *trackState, sample pendingSample) (*track
 	if state.hasStarted && state.lastDTSMS != 0 {
 		if absInt64(sample.dtsMS-state.lastDTSMS) > 5000 {
 			p.reset(true)
-			state.pending = nil
-			state.hasStarted = false
-			state.lastDTSMS = 0
+			p.ensureStart(sample.dtsMS)
 		}
 	}
 	if state.hasStarted && state.pending != nil {
-		if sample.dtsMS <= state.pending.dtsMS {
+		if sample.dtsMS < state.pending.dtsMS {
+			log.Printf("dropping backward HLS sample: stream=%s track=%d dts_ms=%d pending_dts_ms=%d",
+				p.streamID, state.trackID, sample.dtsMS, state.pending.dtsMS)
+			return nil, nil
+		}
+		if sample.dtsMS == state.pending.dtsMS {
 			sample.dtsMS = state.pending.dtsMS + maxInt64(state.lastDurMS, 1)
 		}
 	}
+	p.observeInputDTS(sample.dtsMS)
 	if state.pending == nil {
 		state.pending = &sample
 		state.hasStarted = true
@@ -280,11 +306,12 @@ func (p *Packager) ingestSample(state *trackState, sample pendingSample) (*track
 	if durMS <= 0 {
 		durMS = 1
 	}
+	dtsMS := state.pending.dtsMS
 	full := buildFullSample(state, *state.pending, durMS)
 	state.lastDurMS = durMS
 	state.lastDTSMS = sample.dtsMS
 	state.pending = &sample
-	return &trackSample{trackID: state.trackID, sample: full}, nil
+	return &trackSample{trackID: state.trackID, dtsMS: dtsMS, sample: full}, nil
 }
 
 func (p *Packager) flushTrack(state *trackState) error {
@@ -299,12 +326,67 @@ func (p *Packager) flushTrack(state *trackState) error {
 		durMS = 1
 	}
 	full := buildFullSample(state, *state.pending, durMS)
+	dtsMS := state.pending.dtsMS
 	state.pending = nil
-	return p.appendToPart(trackSample{trackID: state.trackID, sample: full})
+	p.enqueueSample(trackSample{trackID: state.trackID, dtsMS: dtsMS, sample: full})
+	return nil
+}
+
+func (p *Packager) observeInputDTS(dtsMS int64) {
+	if !p.hasLatestInput || dtsMS > p.latestInputDTSMS {
+		p.latestInputDTSMS = dtsMS
+		p.hasLatestInput = true
+	}
+}
+
+func (p *Packager) enqueueSample(sample trackSample) {
+	p.reorderQueue = append(p.reorderQueue, queuedTrackSample{
+		trackSample: sample,
+		order:       p.nextQueueOrder,
+	})
+	p.nextQueueOrder++
+}
+
+func (p *Packager) drainReorderQueue(force bool) error {
+	if len(p.reorderQueue) == 0 {
+		return nil
+	}
+	sort.SliceStable(p.reorderQueue, func(i, j int) bool {
+		if p.reorderQueue[i].dtsMS == p.reorderQueue[j].dtsMS {
+			return p.reorderQueue[i].order < p.reorderQueue[j].order
+		}
+		return p.reorderQueue[i].dtsMS < p.reorderQueue[j].dtsMS
+	})
+
+	cutoffMS := p.latestInputDTSMS - p.partDurationMS
+	processed := 0
+	for i := range p.reorderQueue {
+		queued := p.reorderQueue[i]
+		if !force && (!p.hasLatestInput || queued.dtsMS > cutoffMS) {
+			break
+		}
+		if p.hasLastOutput && queued.dtsMS < p.lastOutputDTSMS {
+			log.Printf("dropping late HLS sample: stream=%s track=%d dts_ms=%d last_output_dts_ms=%d",
+				p.streamID, queued.trackID, queued.dtsMS, p.lastOutputDTSMS)
+			processed++
+			continue
+		}
+		if err := p.appendToPart(queued.trackSample); err != nil {
+			p.reorderQueue = append([]queuedTrackSample(nil), p.reorderQueue[processed:]...)
+			return err
+		}
+		p.lastOutputDTSMS = queued.dtsMS
+		p.hasLastOutput = true
+		processed++
+	}
+	if processed > 0 {
+		p.reorderQueue = append([]queuedTrackSample(nil), p.reorderQueue[processed:]...)
+	}
+	return nil
 }
 
 func (p *Packager) appendToPart(ts trackSample) error {
-	partIdx, segSeq, partStartMS := p.computePartIndex(ts.sample.DecodeTime, ts.trackID == p.videoID)
+	partIdx, segSeq, partStartMS := p.computePartIndex(ts.dtsMS)
 	partEndMS := partStartMS + p.partDurationMS
 
 	if p.currentPart == nil || partIdx != p.currentPart.partIdx || segSeq != p.currentPart.segSeq {
@@ -322,13 +404,7 @@ func (p *Packager) appendToPart(ts trackSample) error {
 	return nil
 }
 
-func (p *Packager) computePartIndex(decodeTime uint64, isVideo bool) (int, uint64, int64) {
-	var tsMS int64
-	if isVideo {
-		tsMS = timescaleToMS(decodeTime, p.videoTS)
-	} else {
-		tsMS = timescaleToMS(decodeTime, p.audioTS)
-	}
+func (p *Packager) computePartIndex(tsMS int64) (int, uint64, int64) {
 	rel := tsMS - p.startTSMS
 	if rel < 0 {
 		rel = 0
@@ -495,7 +571,7 @@ func (p *Packager) maybeWriteInit() error {
 	p.videoID = videoTrak.Tkhd.TrackID
 	p.videoState.trackID = p.videoID
 	p.videoState.timescale = p.videoTS
-	p.videoState.defaultDurMS = 33
+	p.videoState.defaultDurMS = fallbackVideoSampleDurationMS
 	if p.aacConfig.SampleRate > 0 {
 		p.audioTS = uint32(p.aacConfig.SampleRate)
 		audioTrak := addEmptyTrack(init, p.audioTS, "audio", "und")
@@ -540,6 +616,9 @@ func (p *Packager) ensureStart(tsMS int64) {
 }
 
 func (p *Packager) reset(reinit bool) {
+	_ = p.flushTrack(&p.videoState)
+	_ = p.flushTrack(&p.audioState)
+	_ = p.drainReorderQueue(true)
 	_ = p.finalizePart()
 	_ = p.finalizeSegment()
 	p.pendingDiscontinuity = true
@@ -548,8 +627,26 @@ func (p *Packager) reset(reinit bool) {
 	p.started = false
 	p.currentPart = nil
 	p.currentSegment = nil
-	p.videoState.pending = nil
-	p.audioState.pending = nil
+	videoDefaultDurMS := p.videoState.defaultDurMS
+	if videoDefaultDurMS <= 0 {
+		videoDefaultDurMS = fallbackVideoSampleDurationMS
+	}
+	audioDefaultDurMS := p.audioState.defaultDurMS
+	p.videoState = trackState{
+		timescale:     p.videoTS,
+		defaultDurMS:  videoDefaultDurMS,
+		sampleIsVideo: true,
+	}
+	p.audioState = trackState{
+		timescale:    p.audioTS,
+		defaultDurMS: audioDefaultDurMS,
+	}
+	p.reorderQueue = nil
+	p.latestInputDTSMS = 0
+	p.hasLatestInput = false
+	p.lastOutputDTSMS = 0
+	p.hasLastOutput = false
+	p.nextQueueOrder = 0
 	p.initWritten = false
 	p.videoID = 0
 	p.audioID = 0
