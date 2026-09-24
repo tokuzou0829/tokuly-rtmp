@@ -113,28 +113,30 @@ func (p *PlaylistManager) Prune() []Segment {
 }
 
 func (p *PlaylistManager) Render() string {
-	return p.render(p.cfg.EnablePartial)
+	return p.render(p.cfg.EnablePartial, false)
 }
 
 // RenderClassic exposes complete segments to clients that use native HLS.
 // The playlist is served as a static file, so it must not advertise blocking
 // reload or partial segments that the HTTP server cannot coordinate.
 func (p *PlaylistManager) RenderClassic() string {
-	return p.render(false)
+	return p.render(false, true)
 }
 
-func (p *PlaylistManager) render(includePartial bool) string {
+func (p *PlaylistManager) render(includePartial, classic bool) string {
 	b := &strings.Builder{}
 	b.WriteString("#EXTM3U\n")
-	if includePartial {
-		b.WriteString("#EXT-X-VERSION:9\n")
-	} else {
+	if classic {
 		b.WriteString("#EXT-X-VERSION:7\n")
+	} else {
+		b.WriteString("#EXT-X-VERSION:9\n")
 	}
 	b.WriteString(fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", int(math.Ceil(p.cfg.TargetDuration.Seconds()))))
-	if includePartial {
+	if !classic {
 		b.WriteString(fmt.Sprintf("#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,HOLD-BACK=%.3f,PART-HOLD-BACK=%.3f\n",
 			p.cfg.HoldBack.Seconds(), p.cfg.PartHoldBack.Seconds()))
+	}
+	if includePartial {
 		b.WriteString(fmt.Sprintf("#EXT-X-PART-INF:PART-TARGET=%.3f\n", p.cfg.PartDuration.Seconds()))
 	}
 	b.WriteString(fmt.Sprintf("#EXT-X-MAP:URI=\"%s\"\n", p.cfg.InitFilename))
@@ -145,7 +147,7 @@ func (p *PlaylistManager) render(includePartial bool) string {
 	}
 
 	for _, seg := range p.segments {
-		if !includePartial && !seg.Complete {
+		if classic && !seg.Complete {
 			continue
 		}
 		if seg.Discontinuity {
