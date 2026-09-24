@@ -16,20 +16,21 @@ import (
 )
 
 type Config struct {
-	SegmentDuration     time.Duration
-	PartDuration        time.Duration
-	PlaylistWindow      time.Duration
-	TargetDuration      time.Duration
-	HoldBack            time.Duration
-	PartHoldBack        time.Duration
-	KeepSegments        int
+	SegmentDuration      time.Duration
+	PartDuration         time.Duration
+	PlaylistWindow       time.Duration
+	TargetDuration       time.Duration
+	HoldBack             time.Duration
+	PartHoldBack         time.Duration
+	KeepSegments         int
 	RewindPlaylistWindow time.Duration
-	InitFilename        string
-	SegmentFilenameTmpl string
-	PartFilenameTmpl    string
-	PlaylistName        string
-	RewindPlaylistName  string
-	EnablePartial       bool
+	InitFilename         string
+	SegmentFilenameTmpl  string
+	PartFilenameTmpl     string
+	PlaylistName         string
+	ClassicPlaylistName  string
+	RewindPlaylistName   string
+	EnablePartial        bool
 }
 
 type Packager struct {
@@ -107,25 +108,26 @@ type segmentBuilder struct {
 
 func New(cfg Config, storage *storage.Storage, streamID string) *Packager {
 	liveCfg := hls.Config{
-		SegmentDuration: cfg.SegmentDuration,
-		PartDuration:    cfg.PartDuration,
-		PlaylistWindow:  cfg.PlaylistWindow,
-		TargetDuration:  cfg.TargetDuration,
-		HoldBack:        cfg.HoldBack,
-		PartHoldBack:    cfg.PartHoldBack,
-		KeepSegments:    cfg.KeepSegments,
-		EnablePartial:   cfg.EnablePartial,
-		InitFilename:    cfg.InitFilename,
-		PlaylistName:    cfg.PlaylistName,
+		SegmentDuration:     cfg.SegmentDuration,
+		PartDuration:        cfg.PartDuration,
+		PlaylistWindow:      cfg.PlaylistWindow,
+		TargetDuration:      cfg.TargetDuration,
+		HoldBack:            cfg.HoldBack,
+		PartHoldBack:        cfg.PartHoldBack,
+		KeepSegments:        cfg.KeepSegments,
+		EnablePartial:       cfg.EnablePartial,
+		InitFilename:        cfg.InitFilename,
+		PlaylistName:        cfg.PlaylistName,
+		ClassicPlaylistName: cfg.ClassicPlaylistName,
 	}
 	p := &Packager{
-		cfg:              cfg,
-		storage:          storage,
-		streamID:         streamID,
-		playlist:         hls.New(liveCfg, storage, streamID),
-		partDurationMS:   int64(cfg.PartDuration / time.Millisecond),
+		cfg:               cfg,
+		storage:           storage,
+		streamID:          streamID,
+		playlist:          hls.New(liveCfg, storage, streamID),
+		partDurationMS:    int64(cfg.PartDuration / time.Millisecond),
 		segmentDurationMS: int64(cfg.SegmentDuration / time.Millisecond),
-		videoTS:          90000,
+		videoTS:           90000,
 	}
 	p.videoState.sampleIsVideo = true
 	if storage.EnableRewind {

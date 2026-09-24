@@ -17,11 +17,11 @@ import (
 )
 
 type Session struct {
-	StreamKey string
+	StreamKey  string
 	StreamName string
-	App       string
-	RemoteIP  string
-	UserAgent string
+	App        string
+	RemoteIP   string
+	UserAgent  string
 
 	cfg     config.Config
 	policy  policy.Policy
@@ -30,10 +30,10 @@ type Session struct {
 	archiveManager  *archive.Manager
 	archiveRecorder *archive.Recorder
 
-	inspector *inspect.Inspector
-	packager  *packager.Packager
-	accepted  bool
-	closed    bool
+	inspector     *inspect.Inspector
+	packager      *packager.Packager
+	accepted      bool
+	closed        bool
 	videoInfoSent bool
 
 	buffer         []ingestSample
@@ -80,27 +80,28 @@ func NewSession(cfg config.Config, policy policy.Policy, storage *storage.Storag
 		SegmentFilenameTmpl:  cfg.HLS.SegmentFilenameTmpl,
 		PartFilenameTmpl:     cfg.HLS.PartFilenameTmpl,
 		PlaylistName:         cfg.HLS.PlaylistFilename,
+		ClassicPlaylistName:  cfg.HLS.ClassicPlaylistName,
 		RewindPlaylistName:   cfg.HLS.RewindPlaylistName,
 		EnablePartial:        cfg.HLS.EnablePartial,
 	}, sessionStorage, streamName)
 
 	return &Session{
-		StreamKey:       streamKey,
-		StreamName:      streamName,
-		App:             app,
-		RemoteIP:        remoteIP,
-		UserAgent:       userAgent,
-		cfg:             cfg,
-		policy:          policy,
-		storage:         sessionStorage,
-		archiveManager:  archiveManager,
-		inspector:       inspector,
-		packager:        pkg,
-		maxBufferDurMS:  int64(cfg.Limits.MaxBufferedSeconds / time.Millisecond),
-		bufferStartMS:   0,
-		buffer:          nil,
-		accepted:        false,
-		closed:          false,
+		StreamKey:      streamKey,
+		StreamName:     streamName,
+		App:            app,
+		RemoteIP:       remoteIP,
+		UserAgent:      userAgent,
+		cfg:            cfg,
+		policy:         policy,
+		storage:        sessionStorage,
+		archiveManager: archiveManager,
+		inspector:      inspector,
+		packager:       pkg,
+		maxBufferDurMS: int64(cfg.Limits.MaxBufferedSeconds / time.Millisecond),
+		bufferStartMS:  0,
+		buffer:         nil,
+		accepted:       false,
+		closed:         false,
 	}
 }
 

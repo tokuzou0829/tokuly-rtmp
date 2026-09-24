@@ -54,6 +54,7 @@ type HLSConfig struct {
 	EnableDiscontinuity  bool
 	MaxDiscontinuitySeq  int
 	PlaylistFilename     string
+	ClassicPlaylistName  string
 	SegmentFilenameTmpl  string
 	PartFilenameTmpl     string
 	InitFilename         string
@@ -142,6 +143,7 @@ func DefaultConfig() Config {
 			EnableDiscontinuity:  true,
 			MaxDiscontinuitySeq:  1000,
 			PlaylistFilename:     "index.m3u8",
+			ClassicPlaylistName:  "index_classic.m3u8",
 			SegmentFilenameTmpl:  "seg_%06d.m4s",
 			PartFilenameTmpl:     "part_%06d_%02d.m4s",
 			InitFilename:         "init.mp4",

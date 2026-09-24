@@ -13,16 +13,17 @@ import (
 )
 
 type Config struct {
-	SegmentDuration time.Duration
-	PartDuration    time.Duration
-	PlaylistWindow  time.Duration
-	TargetDuration  time.Duration
-	HoldBack        time.Duration
-	PartHoldBack    time.Duration
-	KeepSegments    int
-	EnablePartial   bool
-	InitFilename    string
-	PlaylistName    string
+	SegmentDuration     time.Duration
+	PartDuration        time.Duration
+	PlaylistWindow      time.Duration
+	TargetDuration      time.Duration
+	HoldBack            time.Duration
+	PartHoldBack        time.Duration
+	KeepSegments        int
+	EnablePartial       bool
+	InitFilename        string
+	PlaylistName        string
+	ClassicPlaylistName string
 }
 
 type Part struct {
@@ -41,10 +42,10 @@ type Segment struct {
 }
 
 type PlaylistManager struct {
-	cfg                 Config
-	storage             *storage.Storage
-	streamID            string
-	segments            []Segment
+	cfg                  Config
+	storage              *storage.Storage
+	streamID             string
+	segments             []Segment
 	pendingDiscontinuity bool
 }
 
@@ -112,13 +113,28 @@ func (p *PlaylistManager) Prune() []Segment {
 }
 
 func (p *PlaylistManager) Render() string {
+	return p.render(p.cfg.EnablePartial)
+}
+
+// RenderClassic exposes complete segments to clients that use native HLS.
+// The playlist is served as a static file, so it must not advertise blocking
+// reload or partial segments that the HTTP server cannot coordinate.
+func (p *PlaylistManager) RenderClassic() string {
+	return p.render(false)
+}
+
+func (p *PlaylistManager) render(includePartial bool) string {
 	b := &strings.Builder{}
 	b.WriteString("#EXTM3U\n")
-	b.WriteString("#EXT-X-VERSION:9\n")
+	if includePartial {
+		b.WriteString("#EXT-X-VERSION:9\n")
+	} else {
+		b.WriteString("#EXT-X-VERSION:7\n")
+	}
 	b.WriteString(fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", int(math.Ceil(p.cfg.TargetDuration.Seconds()))))
-	b.WriteString(fmt.Sprintf("#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,HOLD-BACK=%.3f,PART-HOLD-BACK=%.3f\n",
-		p.cfg.HoldBack.Seconds(), p.cfg.PartHoldBack.Seconds()))
-	if p.cfg.EnablePartial {
+	if includePartial {
+		b.WriteString(fmt.Sprintf("#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,HOLD-BACK=%.3f,PART-HOLD-BACK=%.3f\n",
+			p.cfg.HoldBack.Seconds(), p.cfg.PartHoldBack.Seconds()))
 		b.WriteString(fmt.Sprintf("#EXT-X-PART-INF:PART-TARGET=%.3f\n", p.cfg.PartDuration.Seconds()))
 	}
 	b.WriteString(fmt.Sprintf("#EXT-X-MAP:URI=\"%s\"\n", p.cfg.InitFilename))
@@ -129,10 +145,13 @@ func (p *PlaylistManager) Render() string {
 	}
 
 	for _, seg := range p.segments {
+		if !includePartial && !seg.Complete {
+			continue
+		}
 		if seg.Discontinuity {
 			b.WriteString("#EXT-X-DISCONTINUITY\n")
 		}
-		if p.cfg.EnablePartial {
+		if includePartial {
 			for _, part := range seg.Parts {
 				b.WriteString(fmt.Sprintf("#EXT-X-PART:DURATION=%.3f,URI=\"%s\"\n", part.Duration, part.URI))
 			}
@@ -153,7 +172,14 @@ func (p *PlaylistManager) Write() error {
 func (p *PlaylistManager) WriteTo(dir string) error {
 	playlist := p.Render()
 	path := filepath.Join(dir, p.cfg.PlaylistName)
-	return storage.WriteFileAtomic(path, []byte(playlist))
+	if err := storage.WriteFileAtomic(path, []byte(playlist)); err != nil {
+		return err
+	}
+	if p.cfg.ClassicPlaylistName != "" {
+		classicPath := filepath.Join(dir, p.cfg.ClassicPlaylistName)
+		return storage.WriteFileAtomic(classicPath, []byte(p.RenderClassic()))
+	}
+	return nil
 }
 
 func (p *PlaylistManager) LoadFromFile(path string, dropIncomplete bool) (uint64, bool, error) {
